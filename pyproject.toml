@@ -38,14 +38,29 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pylint.main]
-fail-under = 6
 persistent = false
 py-version = "3.10"
 recursive = true
 suggestion-mode = true
 
+
 [tool.pylint.basic]
 good-names-rgxs = "[a-z]"
+
+[tool.pylint."messages control"]
+disable = [
+    "raw-checker-failed",
+    "bad-inline-option",
+    "locally-disabled",
+    "file-ignored",
+    "suppressed-message",
+    "useless-suppression",
+    "deprecated-pragma",
+    "use-symbolic-message-instead",
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+]
 
 [tool.poe.tasks]
 

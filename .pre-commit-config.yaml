@@ -2,12 +2,6 @@ default_language_version:
   python: python3.10
 
 repos:
-  # Pylint
-  - repo: https://github.com/pycqa/pylint
-    rev: v2.16.2
-    hooks:
-      - id: pylint
-
   # isort
   - repo: https://github.com/timothycrosley/isort
     rev: 5.12.0
