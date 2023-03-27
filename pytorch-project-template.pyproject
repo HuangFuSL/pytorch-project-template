@@ -1,0 +1,6 @@
+{
+    "files": [
+        "src/gui/main.py",
+        "src/gui/form.ui"
+    ]
+}
