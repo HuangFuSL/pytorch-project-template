@@ -1,0 +1,50 @@
+[tool.poetry]
+name = "src"
+version = "0.0.0"
+description = "Python Project Template"
+authors = ["HuangFuSL <huangfusl@outlook.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.2.1"
+pre-commit = "^3.1.0"
+pylint = "^2.16.2"
+isort = "^5.12.0"
+autopep8 = "^2.0.1"
+poethepoet = "^0.18.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pylint.main]
+fail-under = 6
+persistent = false
+py-version = "3.10"
+recursive = true
+suggestion-mode = true
+
+[tool.pylint.basic]
+good-names-rgxs = "[a-z]"
+
+[tool.poe.tasks]
+
+    [tool.poe.tasks.launch]
+    help = "Launch the project"
+    cmd = "python -m src"
+
+    [tool.poe.tasks.test]
+    help = "Run the tests"
+    cmd = "pytest"
+
+    [tool.poe.tasks.debug]
+    help = "Debug the project"
+    cmd = "python -m pdb -m src"
+
+    [tool.poe.tasks.debug-test]
+    help = "Run the tests in debug mode"
+    cmd = "python -m pdb -m pytest"
