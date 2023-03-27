@@ -1,13 +1,15 @@
 [tool.poetry]
-name = "src"
+name = "pytorch-project-template"
 version = "0.0.0"
-description = "Python Project Template"
+description = "PyTorch Project Template"
 authors = ["HuangFuSL <huangfusl@outlook.com>"]
 license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = ">=3.10,<3.12"
+pyside6 = "^6.4.2"
+torch = "2.0.0+cu117"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.2.1"
@@ -16,6 +18,20 @@ pylint = "^2.16.2"
 isort = "^5.12.0"
 autopep8 = "^2.0.1"
 poethepoet = "^0.18.1"
+
+
+[[tool.poetry.source]]
+name = "mirrors"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple/"
+default = true
+secondary = false
+
+
+[[tool.poetry.source]]
+name = "torch_cuda"
+url = "https://download.pytorch.org/whl"
+default = false
+secondary = true
 
 [build-system]
 requires = ["poetry-core"]
@@ -33,18 +49,10 @@ good-names-rgxs = "[a-z]"
 
 [tool.poe.tasks]
 
-    [tool.poe.tasks.launch]
-    help = "Launch the project"
-    cmd = "python -m src"
+[tool.poe.tasks.launch]
+help = "Launch the project"
+sequence = [{ ref = "compile" }, { cmd = "python -m src" }]
 
-    [tool.poe.tasks.test]
-    help = "Run the tests"
-    cmd = "pytest"
-
-    [tool.poe.tasks.debug]
-    help = "Debug the project"
-    cmd = "python -m pdb -m src"
-
-    [tool.poe.tasks.debug-test]
-    help = "Run the tests in debug mode"
-    cmd = "python -m pdb -m pytest"
+[tool.poe.tasks.compile]
+help = "Compile *.ui files"
+script = "build_ui:compile()"
