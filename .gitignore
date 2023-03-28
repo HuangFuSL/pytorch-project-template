@@ -128,5 +128,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-*_ui.py
+ui_*.py
+src/**/*_ui.py
 *.pyproject.user
