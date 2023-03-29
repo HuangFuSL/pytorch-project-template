@@ -1,0 +1,7 @@
+data/*
+!data/__init__.py
+!data/README
+
+model/*
+!model/__init__.py
+!model/README
