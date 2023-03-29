@@ -70,8 +70,7 @@ class MainWindow(QMainWindow):
         )
         self.ui.reloadDataButton.clicked.connect(self.dataSelector.refresh)
 
-    @Slot()
-    def on_buttonStart_clicked(self):
+    def setupTrainParams(self, initializeModel: bool = True):
         # Super parameters
         epoch = self.ui.epochInput.value()
         batchSize = self.ui.batchSizeInput.value()
@@ -79,24 +78,26 @@ class MainWindow(QMainWindow):
         enableScheduler = self.ui.schedulerToggle.isChecked()
 
         # Model and optimizer
-        model = self.modelSelector.value[0](**self.modelParams.buildArgs())
-        if self.ui.modelInitToggle.isChecked():
-            if not self.ui.modelSeedInput.text():
+        if initializeModel:
+            model = self.modelSelector.value[0](**self.modelParams.buildArgs())
+            if self.ui.modelInitToggle.isChecked():
+                if not self.ui.modelSeedInput.text():
+                    torch.resetSeed()
+                else:
+                    torch.setSeed(int(self.ui.modelSeedInput.text()))
+            if self.ui.modelLoadToggle.isChecked():
                 torch.resetSeed()
-            else:
-                torch.setSeed(int(self.ui.modelSeedInput.text()))
-        if self.ui.modelLoadToggle.isChecked():
-            torch.resetSeed()
-            torch.loadModelDict(model, self.ui.modelPathInput.text())
-        model.train()
+                torch.loadModelDict(model, self.ui.modelPathInput.text())
+        else:
+            model = self.trainer.model
         optim = self.optimSelector.value[0]
         optimArgs = self.optimParams.buildArgs()
         scheduler = self.schedulerSelector.value[0]
         schedulerArgs = self.schedulerParams.buildArgs() if enableScheduler else {}
         dataloader = self.dataSelector.value.dataloader(batchSize, shuffle)
 
-        model.train()
         self.trainer.setModel(model)
+        self.trainer.model.train()
         self.trainer.setEpoch(epoch)
         self.trainer.setOptimizer(optim, model.parameters(), **optimArgs)
         if enableScheduler:
@@ -107,11 +108,22 @@ class MainWindow(QMainWindow):
         self.ui.buttonStart.setEnabled(False)
         self.ui.buttonSave.setEnabled(False)
         self.ui.buttonScalar.setEnabled(False)
+        self.ui.buttonContinue.setEnabled(False)
         self.ui.trainProgress.setValue(0)
         self.ui.trainProgress.setMaximum(epoch)
 
-        self.scalars.clear()
+        if initializeModel:
+            self.scalars.clear()
+            self.trainer.resetEpoch()
         self.trainer.start()
+
+    @Slot()
+    def on_buttonStart_clicked(self):
+        self.setupTrainParams()
+
+    @Slot()
+    def on_buttonContinue_clicked(self):
+        self.setupTrainParams(False)
 
     @Slot()
     def on_modelLoadToggle_toggled(self):
@@ -153,6 +165,7 @@ class MainWindow(QMainWindow):
         self.ui.buttonStart.setEnabled(True)
         self.ui.buttonSave.setEnabled(True)
         self.ui.buttonScalar.setEnabled(True)
+        self.ui.buttonContinue.setEnabled(True)
 
     @Slot(int, float)
     def on_epochStart(self, epoch: int, time: float):
@@ -161,5 +174,3 @@ class MainWindow(QMainWindow):
     @Slot(int, float)
     def on_epochEnd(self, epoch: int, time: float):
         self.ui.trainProgress.setValue(epoch + 1)
-        self.scalars.add('_time', time - self.epochStartTime)
-        self.scalars.add('_epoch', epoch + 1)

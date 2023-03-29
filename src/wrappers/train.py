@@ -25,6 +25,7 @@ class QTrainingWorker(QThread):
         self._scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None
         self._dataloader: Optional[torch.utils.data.DataLoader] = None
         self._thread: Optional[QThread] = None
+        self._currentEpoch = 0
 
     def __len__(self):
         return self.epoch
@@ -83,6 +84,9 @@ class QTrainingWorker(QThread):
     def setEpoch(self, n: int):
         self._epoch = n
 
+    def resetEpoch(self):
+        self._currentEpoch = 0
+
     def setScheduler(self, scheduler: Type[torch.optim.lr_scheduler._LRScheduler], **kwargs):
         if hash(scheduler) != hash(self._scheduler):
             self._scheduler = scheduler(self.optimizer, **kwargs)
@@ -92,8 +96,11 @@ class QTrainingWorker(QThread):
 
     def run(self):
         try:
-            for _ in range(self.epoch):
-                self.epochStart.emit(_, time.time())
+            start = self._currentEpoch + 1
+            for _ in range(start, start + self.epoch):
+                self._currentEpoch = _
+                epochStartTime = time.time()
+                self.epochStart.emit(_ - start, epochStartTime)
                 scalars = collections.defaultdict(lambda: 0.0)
                 for data in self.dataloader:
                     kwargs = {
@@ -105,10 +112,12 @@ class QTrainingWorker(QThread):
                     self.optimizer.step(functools.partial(
                         self.closure, **kwargs
                     ))
-                epochEndTime = time.time()
                 for i, (key, value) in enumerate(scalars.items(), 1):
                     self.sendScalar(key, value, True)
-                self.epochEnd.emit(_, epochEndTime)
+                epochEndTime = time.time()
+                self.sendScalar('_epoch', _, True)
+                self.sendScalar('_time', epochEndTime - epochStartTime)
+                self.epochEnd.emit(_ - start, epochEndTime)
                 if self.scheduler is not None:
                     self.scheduler.step()
         finally:
