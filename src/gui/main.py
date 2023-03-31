@@ -1,5 +1,8 @@
-from PySide6.QtCore import Qt, Slot
-from PySide6.QtWidgets import QCheckBox, QFileDialog, QMainWindow, QRadioButton
+from typing import Any, Callable, List, Sequence
+
+from PySide6.QtCore import QTimer, Slot
+from PySide6.QtWidgets import (QCheckBox, QFileDialog, QMainWindow,
+                               QProgressBar, QRadioButton, QWidget)
 
 from .. import PROJECT_NAME
 from ..model import closure
@@ -12,10 +15,47 @@ def setupWidgets(*widgets, controller: QRadioButton | QCheckBox, reverse=False):
         for w in widgets:
             w.setEnabled(controller.isChecked() ^ reverse)
     if isinstance(controller, QCheckBox):
-        controller.stateChanged.connect(f)
+        controller.stateChanged.connect(f)  # type: ignore
     elif isinstance(controller, QRadioButton):
-        controller.toggled.connect(f)
+        controller.toggled.connect(f)  # type: ignore
     f()
+
+
+def setupBackendToggle(
+    disabled: List[QCheckBox], enabled: List[QCheckBox],
+    cudaGroup: List[QCheckBox], cudnnGroup: List[QCheckBox]
+):
+    d, e, f, cudaStatus, cudnnStatus = torch.detectBackends()
+    for widget, _ in zip(disabled, d):
+        widget.setChecked(_)
+    for widget, _ in zip(enabled, e):
+        widget.setEnabled(_)
+    for widget, (_, setter) in zip(enabled, f):
+        widget.setChecked(_)
+        widget.stateChanged.connect(setter)  # type: ignore
+    for widget, (_, setter) in zip(cudaGroup, cudaStatus):
+        widget.setEnabled(d[0])
+        if d[0]:
+            widget.setChecked(_)
+        widget.stateChanged.connect(setter)  # type: ignore
+    for widget, (_, setter) in zip(cudnnGroup, cudnnStatus):
+        widget.setEnabled(e[0] and f[0][0])
+        if e[0] and f[0]:
+            widget.setChecked(_)
+        widget.stateChanged.connect(setter)  # type: ignore
+
+
+def setWidgetAttribute(*widgets: QWidget, method: Callable[..., None], args: Sequence[Any]):
+    for widget in widgets:
+        method(widget, *args)
+
+
+def refreshProgress(widget: QProgressBar, value: float, max_: float):
+    while value < 100 and value > 0:
+        value *= 100
+        max_ *= 100
+    widget.setMaximum(int(max_))
+    widget.setValue(int(value))
 
 
 class MainWindow(QMainWindow):
@@ -23,8 +63,8 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.ui = form_ui.Ui_MainWindow()
         self.ui.setupUi(self)
-        self.setupWidgets()
-        self.setupSelector()
+        self.setupTrainerPage()
+        self.setupCudaPage()
         self.setWindowTitle(PROJECT_NAME)
 
         self.epochStartTime = 0
@@ -36,7 +76,7 @@ class MainWindow(QMainWindow):
         self.trainer.epochEnd.connect(self.on_epochEnd)
         self.trainer.setClosure(closure)
 
-    def setupWidgets(self):
+    def setupTrainerPage(self):
         setupWidgets(
             self.ui.schedulerSelectCombo, self.ui.schedulerLabel1,
             self.ui.schedulerLabel2, self.ui.schedulerParamTable,
@@ -51,7 +91,6 @@ class MainWindow(QMainWindow):
             controller=self.ui.modelLoadToggle
         )
 
-    def setupSelector(self):
         self.modelSelector, self.modelParams = dynamic.buildDynamicClassSelector(
             self.ui.modelSelectCombo, self.ui.modelParamTable,
             dynamic.detectModels, {'self'}
@@ -70,12 +109,59 @@ class MainWindow(QMainWindow):
         )
         self.ui.reloadDataButton.clicked.connect(self.dataSelector.refresh)
 
+    def setupCudaPage(self):
+        setupBackendToggle([
+            self.ui.cudaAvailableToggle,
+            self.ui.mpsAvailableToggle,
+            self.ui.mklAvailableToggle,
+            self.ui.mkldnnAvailableToggle,
+            self.ui.openmpAvailableToggle
+        ], [
+            self.ui.cudnnAvailableToggle,
+            self.ui.opteinsumAvailableToggle
+        ], [
+            self.ui.cudaTF32Toggle,
+            self.ui.cudaFP16Toggle,
+            self.ui.cudaBF16Toggle
+        ], [
+            self.ui.cudnnTF32Toggle,
+            self.ui.cudnnDetermToggle,
+            self.ui.cudnnBenchToggle
+        ])
+        self.ui.cudaVersionLabel.setText(torch.getCudaVersion())
+        cudaStatus = self.ui.cudaAvailableToggle.isChecked()
+        cudaDevices = torch.getCudaDevices()
+        setWidgetAttribute(
+            self.ui.useCudaToggle, self.ui.cudaDevicePrompt,
+            self.ui.cudaSelectCombo, self.ui.cudaVersionPrompt,
+            self.ui.cudaVersionLabel, self.ui.cudaMetricsGroup,
+            method=QWidget.setEnabled, args=[cudaStatus]
+        )
+        self.ui.useCudaToggle.setChecked(cudaStatus)
+        self.ui.cudaSelectCombo.clear()
+        for k, v in cudaDevices.items():
+            text = f'[cuda:{k}]: {v["name"]} - {v["total_memory"]} MiB'
+            self.ui.cudaSelectCombo.addItem(text)
+
+        def refreshMetrics():
+            a, r, f, t = torch.getGpuMemory()
+            refreshProgress(self.ui.allocatedProgress, a, r)
+            refreshProgress(self.ui.reservedProgress, r, t)
+            refreshProgress(self.ui.memoryProgress, t - f, t)
+        timer = QTimer(self)
+        timer.setInterval(1000)
+        timer.timeout.connect(refreshMetrics)  # type: ignore
+        timer.start()
+        refreshMetrics()
+
     def setupTrainParams(self, initializeModel: bool = True):
         # Super parameters
         epoch = self.ui.epochInput.value()
         batchSize = self.ui.batchSizeInput.value()
         shuffle = self.ui.shuffleInput.isChecked()
         enableScheduler = self.ui.schedulerToggle.isChecked()
+        useCuda = self.ui.useCudaToggle.isChecked()
+        cudaDevId = self.ui.cudaSelectCombo.currentIndex()
 
         # Model and optimizer
         if initializeModel:
@@ -92,16 +178,20 @@ class MainWindow(QMainWindow):
             model = self.trainer.model
         optim = self.optimSelector.value[0]
         optimArgs = self.optimParams.buildArgs()
-        scheduler = self.schedulerSelector.value[0]
-        schedulerArgs = self.schedulerParams.buildArgs() if enableScheduler else {}
+        if enableScheduler:
+            scheduler = self.schedulerSelector.value[0]
+            schedulerArgs = self.schedulerParams.buildArgs()
         dataloader = self.dataSelector.value.dataloader(batchSize, shuffle)
+        dev = torch.getDevice(cudaDevId if useCuda else None)
 
         self.trainer.setModel(model)
-        self.trainer.model.train()
         self.trainer.setEpoch(epoch)
+        self.trainer.setDevice(dev)
         self.trainer.setOptimizer(optim, model.parameters(), **optimArgs)
         if enableScheduler:
-            self.trainer.setScheduler(scheduler, **schedulerArgs)
+            self.trainer.setScheduler(
+                scheduler, **schedulerArgs  # type: ignore
+            )
         self.trainer.setDataloader(dataloader)
 
         # UI element

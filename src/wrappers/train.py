@@ -6,6 +6,7 @@ from typing import Callable, Optional, Type
 import torch.nn
 import torch.optim
 import torch.utils.data
+import tqdm
 from PySide6.QtCore import QThread, Signal
 
 
@@ -26,6 +27,7 @@ class QTrainingWorker(QThread):
         self._dataloader: Optional[torch.utils.data.DataLoader] = None
         self._thread: Optional[QThread] = None
         self._currentEpoch = 0
+        self._device = torch.device('cpu')
 
     def __len__(self):
         return self.epoch
@@ -67,6 +69,10 @@ class QTrainingWorker(QThread):
             raise RuntimeError('Dataloader not set')
         return self._dataloader
 
+    @property
+    def device(self):
+        return self._device
+
     def setModel(self, model: torch.nn.Module):
         if hash(model) != hash(self._model):
             self._model = model
@@ -94,9 +100,14 @@ class QTrainingWorker(QThread):
     def setDataloader(self, dataloader: torch.utils.data.DataLoader):
         self._dataloader = dataloader
 
+    def setDevice(self, dev: torch.device):
+        self.model.to(dev)
+        self._device = dev
+
     def run(self):
         try:
             start = self._currentEpoch + 1
+            self.model.train()
             for _ in range(start, start + self.epoch):
                 self._currentEpoch = _
                 epochStartTime = time.time()
@@ -106,6 +117,7 @@ class QTrainingWorker(QThread):
                     kwargs = {
                         'model': self.model,
                         'optim': self.optimizer,
+                        'device': self.device,
                         'data': data,
                         'scalars': scalars
                     }

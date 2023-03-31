@@ -16,7 +16,7 @@ U = T.TypeVar('U')
 
 
 def detectClasses(
-    module: ModuleType, reload: bool, type_: T.Type[U]
+    module: ModuleType, reload: bool, *types: T.Type[U]
 ) -> T.Dict[str, T.Tuple[T.Type[U], inspect.Signature]]:
     objs = importlib.reload(module) if reload else module
     result: T.Dict[str, T.Tuple[T.Type[U], inspect.Signature]] = {}
@@ -26,8 +26,9 @@ def detectClasses(
         obj = getattr(objs, name)
         if not isinstance(obj, type):
             continue
-        if not issubclass(obj, type_):
+        if not any(issubclass(obj, type_) for type_ in types):
             continue
+        obj = T.cast(T.Type[U], obj)
         result[name] = (obj, inspect.signature(obj.__init__))
     return result
 
@@ -57,7 +58,9 @@ def detectOptimizers():
 
 def detectSchedulers():
     return detectClasses(
-        torch.optim.lr_scheduler, False, torch.optim.lr_scheduler._LRScheduler
+        torch.optim.lr_scheduler, False,
+        torch.optim.lr_scheduler._LRScheduler,
+        torch.optim.lr_scheduler.LRScheduler
     )
 
 
