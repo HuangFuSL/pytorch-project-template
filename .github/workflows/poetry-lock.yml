@@ -20,6 +20,10 @@ jobs:
       - name: Update poetry.lock file
         run: |
           poetry lock
+      - name: Check for changes
+        id: verify_diff
+        run: |
+          git diff --quiet . || echo "changed=true" >> $GITHUB_OUTPUT
       - name: Commit changes
         run: |
           git config --global user.name 'GitHub Actions'
@@ -27,3 +31,9 @@ jobs:
           git add poetry.lock
           git commit -m "Update poetry.lock file"
           git push
+      - name: Push
+        if: steps.verify_diff.outputs.changed == 'true'
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.head_ref }}
