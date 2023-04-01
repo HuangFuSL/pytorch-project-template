@@ -22,13 +22,6 @@ poethepoet = "^0.18.1"
 [[tool.poetry.source]]
 name = "mirrors"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple/"
-default = true
-secondary = false
-
-
-[[tool.poetry.source]]
-name = "torch_cuda"
-url = "https://download.pytorch.org/whl"
 default = false
 secondary = true
 
