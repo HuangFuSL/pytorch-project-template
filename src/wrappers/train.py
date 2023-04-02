@@ -8,6 +8,7 @@ import torch.optim
 import torch.utils.data
 import tqdm
 from PySide6.QtCore import QThread, Signal
+from typing_extensions import Literal
 
 
 class QTrainingWorker(QThread):
@@ -16,6 +17,7 @@ class QTrainingWorker(QThread):
     scalars = Signal(str, float, bool, name='scalar')
     epochStart = Signal(int, float, name='epochStart')
     epochEnd = Signal(int, float, name='epochEnd')
+    prof = Signal(dict, float, name='profile')
 
     def __init__(self):
         super().__init__()
@@ -27,6 +29,7 @@ class QTrainingWorker(QThread):
         self._dataloader: Optional[torch.utils.data.DataLoader] = None
         self._thread: Optional[QThread] = None
         self._currentEpoch = 0
+        self._profile: Optional[Literal['c', 'py']] = None
         self._device = torch.device('cpu')
 
     def __len__(self):
@@ -73,6 +76,10 @@ class QTrainingWorker(QThread):
     def device(self):
         return self._device
 
+    @property
+    def profile(self):
+        return self._profile
+
     def setModel(self, model: torch.nn.Module):
         if hash(model) != hash(self._model):
             self._model = model
@@ -104,33 +111,55 @@ class QTrainingWorker(QThread):
         self.model.to(dev)
         self._device = dev
 
+    def setProfile(self, profile: Optional[Literal['c', 'py']] = None):
+        self._profile = profile
+
+    def performEpoch(self, start: int, index: int):
+        self._currentEpoch = index
+        epochStartTime = time.time()
+        self.epochStart.emit(index - start, epochStartTime)
+        scalars = collections.defaultdict(lambda: 0.0)
+        for data in self.dataloader:
+            kwargs = {
+                'model': self.model,
+                'optim': self.optimizer,
+                'device': self.device,
+                'data': data,
+                'scalars': scalars
+            }
+            self.optimizer.step(functools.partial(
+                self.closure, **kwargs
+            ))
+        for key, value in scalars.items():
+            self.sendScalar(key, value, True)
+        epochEndTime = time.time()
+        self.sendScalar('_epoch', index, True)
+        self.sendScalar('_time', epochEndTime - epochStartTime)
+        self.epochEnd.emit(index - start, epochEndTime)
+        if self.scheduler is not None:
+            self.scheduler.step()
+
     def run(self):
+        if self.profile is not None:
+            pstats = __import__('pstats')
+        else:
+            pstats = None
+        if self.profile == 'c':
+            profile = __import__('cProfile')
+        elif self.profile == 'py':
+            profile = __import__('profile')
+        else:
+            profile = None
         try:
             start = self._currentEpoch + 1
             self.model.train()
             for _ in range(start, start + self.epoch):
-                self._currentEpoch = _
-                epochStartTime = time.time()
-                self.epochStart.emit(_ - start, epochStartTime)
-                scalars = collections.defaultdict(lambda: 0.0)
-                for data in self.dataloader:
-                    kwargs = {
-                        'model': self.model,
-                        'optim': self.optimizer,
-                        'device': self.device,
-                        'data': data,
-                        'scalars': scalars
-                    }
-                    self.optimizer.step(functools.partial(
-                        self.closure, **kwargs
-                    ))
-                for i, (key, value) in enumerate(scalars.items(), 1):
-                    self.sendScalar(key, value, True)
-                epochEndTime = time.time()
-                self.sendScalar('_epoch', _, True)
-                self.sendScalar('_time', epochEndTime - epochStartTime)
-                self.epochEnd.emit(_ - start, epochEndTime)
-                if self.scheduler is not None:
-                    self.scheduler.step()
+                if profile is not None and pstats is not None:
+                    pr = profile.Profile()
+                    pr.runcall(self.performEpoch, start, _)
+                    p = pstats.Stats(pr).get_stats_profile()
+                    self.prof.emit(p.func_profiles, p.total_tt)
+                else:
+                    self.performEpoch(start, _)
         finally:
             self.ended.emit()
