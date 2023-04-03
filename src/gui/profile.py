@@ -26,7 +26,7 @@ def pyProfileAvailable():
         return False
 
 
-def transform(profile: Dict[str, pstats.FunctionProfile]):
+def transformPython(profile: Dict[str, pstats.FunctionProfile]):
     def toDict(profile: pstats.FunctionProfile):
         nameMap = {
             'ncalls': 'count', 'tottime': 't', 'percall_tottime': 'at',
@@ -46,10 +46,10 @@ def transform(profile: Dict[str, pstats.FunctionProfile]):
     return records
 
 
-def saveProfile(
+def savePythonProfile(
     profile: Dict[str, pstats.FunctionProfile], path: str, format: str
 ):
-    records = transform(profile)
+    records = transformPython(profile)
     if format == 'csv':
         with open(path, 'w', newline='') as f:
             writer = csv.DictWriter(f, records[0].keys())
@@ -60,8 +60,11 @@ def saveProfile(
             json.dump(records, f)
 
 
-def drawTable(profile: Dict[str, pstats.FunctionProfile], widget: QTableWidget):
-    records = transform(profile)
+def drawPythonTable(
+    profile: Dict[str, pstats.FunctionProfile],
+    widget: QTableWidget
+):
+    records = transformPython(profile)
     headers = {
         'name': 300, 'count': 40, 'pcount': 40, 't': 40, 'at': 40,
         'T': 40, 'aT': 40, 'file': 600, 'lineno': 40

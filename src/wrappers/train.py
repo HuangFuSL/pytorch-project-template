@@ -17,7 +17,7 @@ class QTrainingWorker(QThread):
     scalars = Signal(str, float, bool, name='scalar')
     epochStart = Signal(int, float, name='epochStart')
     epochEnd = Signal(int, float, name='epochEnd')
-    prof = Signal(dict, float, name='profile')
+    pythonProf = Signal(dict, float, name='profile')
 
     def __init__(self):
         super().__init__()
@@ -29,7 +29,7 @@ class QTrainingWorker(QThread):
         self._dataloader: Optional[torch.utils.data.DataLoader] = None
         self._thread: Optional[QThread] = None
         self._currentEpoch = 0
-        self._profile: Optional[Literal['c', 'py']] = None
+        self._pythonProfile: Optional[Literal['c', 'py']] = None
         self._device = torch.device('cpu')
 
     def __len__(self):
@@ -77,8 +77,8 @@ class QTrainingWorker(QThread):
         return self._device
 
     @property
-    def profile(self):
-        return self._profile
+    def pythonProfile(self):
+        return self._pythonProfile
 
     def setModel(self, model: torch.nn.Module):
         if hash(model) != hash(self._model):
@@ -111,8 +111,8 @@ class QTrainingWorker(QThread):
         self.model.to(dev)
         self._device = dev
 
-    def setProfile(self, profile: Optional[Literal['c', 'py']] = None):
-        self._profile = profile
+    def setPythonProfile(self, profile: Optional[Literal['c', 'py']] = None):
+        self._pythonProfile = profile
 
     def performEpoch(self, start: int, index: int):
         self._currentEpoch = index
@@ -140,13 +140,13 @@ class QTrainingWorker(QThread):
             self.scheduler.step()
 
     def run(self):
-        if self.profile is not None:
+        if self.pythonProfile is not None:
             pstats = __import__('pstats')
         else:
             pstats = None
-        if self.profile == 'c':
+        if self.pythonProfile == 'c':
             profile = __import__('cProfile')
-        elif self.profile == 'py':
+        elif self.pythonProfile == 'py':
             profile = __import__('profile')
         else:
             profile = None
@@ -158,7 +158,7 @@ class QTrainingWorker(QThread):
                     pr = profile.Profile()
                     pr.runcall(self.performEpoch, start, _)
                     p = pstats.Stats(pr).get_stats_profile()
-                    self.prof.emit(p.func_profiles, p.total_tt)
+                    self.pythonProf.emit(p.func_profiles, p.total_tt)
                 else:
                     self.performEpoch(start, _)
         finally:

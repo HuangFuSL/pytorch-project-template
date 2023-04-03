@@ -57,7 +57,7 @@
      </sizepolicy>
     </property>
     <property name="currentIndex">
-     <number>0</number>
+     <number>2</number>
     </property>
     <widget class="QWidget" name="trainSettingsTab">
      <property name="sizePolicy">
@@ -938,14 +938,14 @@
        <item>
         <layout class="QHBoxLayout" name="horizontalLayout_12">
          <item>
-          <widget class="QCheckBox" name="profileToggle">
+          <widget class="QCheckBox" name="pythonProfileToggle">
            <property name="text">
             <string>Enable Python profilers</string>
            </property>
           </widget>
          </item>
          <item>
-          <widget class="QRadioButton" name="cProfileToggle">
+          <widget class="QRadioButton" name="cPythonProfileToggle">
            <property name="enabled">
             <bool>false</bool>
            </property>
@@ -958,7 +958,7 @@
           </widget>
          </item>
          <item>
-          <widget class="QRadioButton" name="pyProfileToggle">
+          <widget class="QRadioButton" name="pyPythonProfileToggle">
            <property name="enabled">
             <bool>false</bool>
            </property>
@@ -1001,7 +1001,7 @@
           </widget>
          </item>
          <item>
-          <widget class="QComboBox" name="profileEpochCombo">
+          <widget class="QComboBox" name="pythonProfileEpochCombo">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
              <horstretch>1</horstretch>
@@ -1011,14 +1011,14 @@
           </widget>
          </item>
          <item>
-          <widget class="QToolButton" name="buttonSaveProfile">
+          <widget class="QToolButton" name="buttonSavePythonProfile">
            <property name="text">
             <string>Save</string>
            </property>
           </widget>
          </item>
          <item>
-          <widget class="QLabel" name="profileSummaryLabel">
+          <widget class="QLabel" name="pythonProfileSummaryLabel">
            <property name="sizePolicy">
             <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
              <horstretch>0</horstretch>
@@ -1122,7 +1122,7 @@
         </layout>
        </item>
        <item>
-        <widget class="QTableWidget" name="profileStatsTable">
+        <widget class="QTableWidget" name="pythonProfileStatsTable">
          <property name="sortingEnabled">
           <bool>true</bool>
          </property>

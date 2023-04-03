@@ -2,7 +2,8 @@ from typing import Any, Callable, List, Sequence
 
 from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtWidgets import (QCheckBox, QFileDialog, QMainWindow,
-                               QProgressBar, QRadioButton, QWidget)
+                               QProgressBar, QRadioButton, QTableWidget,
+                               QWidget)
 
 from .. import PROJECT_NAME
 from ..model import closure
@@ -19,6 +20,14 @@ def setupWidgets(*widgets, controller: QRadioButton | QCheckBox, reverse=False):
     elif isinstance(controller, QRadioButton):
         controller.toggled.connect(f)  # type: ignore
     f()
+
+
+def setupTableSort(widget: QTableWidget):
+    def f(index: int, order: Qt.SortOrder):
+        widget.sortByColumn(index, order)
+
+    header = widget.horizontalHeader()
+    header.sortIndicatorChanged.connect(f)
 
 
 def setupBackendToggle(
@@ -76,7 +85,7 @@ class MainWindow(QMainWindow):
         self.trainer.ended.connect(self.on_trainer_ended)
         self.trainer.epochStart.connect(self.on_epochStart)
         self.trainer.epochEnd.connect(self.on_epochEnd)
-        self.trainer.prof.connect(self.onProfileReceived)
+        self.trainer.pythonProf.connect(self.onPythonProfileReceived)
         self.trainer.setClosure(closure)
 
     def setupTrainerPage(self):
@@ -158,41 +167,44 @@ class MainWindow(QMainWindow):
         refreshMetrics()
 
     def setupProfilingPage(self):
+        # Python page
         cStatus = profile.cProfileAvailable()
         pyStatus = profile.pyProfileAvailable()
         if not cStatus and not pyStatus:
-            self.ui.profileToggle.setEnabled(False)
+            self.ui.pythonProfileToggle.setEnabled(False)
         if not cStatus:
-            self.ui.cProfileToggle.setEnabled(False)
-            self.ui.pyProfileToggle.setChecked(True)
+            self.ui.cPythonProfileToggle.setEnabled(False)
+            self.ui.pyPythonProfileToggle.setChecked(True)
         else:
             setupWidgets(
-                self.ui.cProfileToggle, controller=self.ui.profileToggle
+                self.ui.cPythonProfileToggle,
+                controller=self.ui.pythonProfileToggle
             )
         if not pyStatus:
-            self.ui.pyProfileToggle.setEnabled(False)
-            self.ui.cProfileToggle.setChecked(True)
+            self.ui.pyPythonProfileToggle.setEnabled(False)
+            self.ui.cPythonProfileToggle.setChecked(True)
         else:
             setupWidgets(
-                self.ui.pyProfileToggle, controller=self.ui.profileToggle
+                self.ui.pyPythonProfileToggle,
+                controller=self.ui.pythonProfileToggle
             )
 
-        def onProfileChanged(index: int):
+        def onPythonProfileChanged(index: int):
             if not self.profile:
-                self.ui.profileStatsTable.clear()
+                self.ui.pythonProfileStatsTable.clear()
                 return
             prof, time = self.profile[index]
-            self.ui.profileStatsTable.clear()
-            tCall, pCall = profile.drawTable(prof, self.ui.profileStatsTable)
+            self.ui.pythonProfileStatsTable.clear()
+            tCall, pCall = profile.drawPythonTable(
+                prof, self.ui.pythonProfileStatsTable
+            )
             summary = f'{tCall} function calls ({pCall} primitive calls) in {time:.3f} seconds'
-            self.ui.profileSummaryLabel.setText(summary)
+            self.ui.pythonProfileSummaryLabel.setText(summary)
 
-        def onSortChanged(index: int, order: Qt.SortOrder):
-            self.ui.profileStatsTable.sortByColumn(index, order)
-
-        header = self.ui.profileStatsTable.horizontalHeader()
-        header.sortIndicatorChanged.connect(onSortChanged)
-        self.ui.profileEpochCombo.currentIndexChanged.connect(onProfileChanged)
+        setupTableSort(self.ui.pythonProfileStatsTable)
+        self.ui.pythonProfileEpochCombo.currentIndexChanged.connect(
+            onPythonProfileChanged
+        )
 
     def setupTrainParams(self, initializeModel: bool = True):
         # Super parameters
@@ -202,8 +214,8 @@ class MainWindow(QMainWindow):
         enableScheduler = self.ui.schedulerToggle.isChecked()
         useCuda = self.ui.useCudaToggle.isChecked()
         cudaDevId = self.ui.cudaSelectCombo.currentIndex()
-        if self.ui.profileToggle.isChecked():
-            if self.ui.cProfileToggle.isChecked():
+        if self.ui.pythonProfileToggle.isChecked():
+            if self.ui.cPythonProfileToggle.isChecked():
                 profile = 'c'
             else:
                 profile = 'py'
@@ -240,7 +252,7 @@ class MainWindow(QMainWindow):
                 scheduler, **schedulerArgs  # type: ignore
             )
         self.trainer.setDataloader(dataloader)
-        self.trainer.setProfile(profile)
+        self.trainer.setPythonProfile(profile)
         self.profile.clear()
 
         # UI element
@@ -250,9 +262,9 @@ class MainWindow(QMainWindow):
         self.ui.buttonContinue.setEnabled(False)
         self.ui.trainProgress.setValue(0)
         self.ui.trainProgress.setMaximum(epoch)
-        self.ui.profileEpochCombo.clear()
-        self.ui.profileStatsTable.clear()
-        self.ui.profileSummaryLabel.setText(
+        self.ui.pythonProfileEpochCombo.clear()
+        self.ui.pythonProfileStatsTable.clear()
+        self.ui.pythonProfileSummaryLabel.setText(
             'xxx function calls (yyy primitive calls) in zzz seconds'
         )
 
@@ -319,21 +331,22 @@ class MainWindow(QMainWindow):
     def on_epochEnd(self, epoch: int, time: float):
         self.ui.trainProgress.setValue(epoch + 1)
 
-    def onProfileReceived(self, prof, time):
+    def onPythonProfileReceived(self, prof, time):
         self.profile.append((prof, time))
-        self.ui.profileEpochCombo.addItem(
+        self.ui.pythonProfileEpochCombo.addItem(
             f'Epoch {len(self.profile)}: {time:.3f}s'
         )
         if len(self.profile) == 1:
-            self.ui.profileEpochCombo.setCurrentIndex(0)
+            self.ui.pythonProfileEpochCombo.setCurrentIndex(0)
 
     @Slot()
-    def on_buttonSaveProfile_clicked(self):
+    def on_buttonSavePythonProfile_clicked(self):
         filters = {'CSV (*.csv)': 'csv', 'JSON (*.json)': 'json'}
         dest, filter = QFileDialog.getSaveFileName(
             self, 'Save profile stats', '.', ';;'.join(filters)
         )
         if not dest:
             return
-        index = self.ui.profileEpochCombo.currentIndex()
-        profile.saveProfile(self.profile[index][0], dest, filters[filter])
+        index = self.ui.pythonProfileEpochCombo.currentIndex()
+        profile.savePythonProfile(
+            self.profile[index][0], dest, filters[filter])
