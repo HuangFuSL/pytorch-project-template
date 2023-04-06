@@ -1,6 +1,4 @@
-import csv
 import functools
-import json
 import pstats
 from typing import Any, Callable, Dict, List, Optional
 
@@ -131,15 +129,7 @@ def transformPytorch(profile: List[PytorchProfileRecord]):
 def savePythonProfile(
     profile: Dict[str, pstats.FunctionProfile], path: str, format: str
 ):
-    records = transformPython(profile)
-    if format == 'csv':
-        with open(path, 'w', newline='') as f:
-            writer = csv.DictWriter(f, records[0].keys())
-            writer.writeheader()
-            writer.writerows(records)
-    elif format == 'json':
-        with open(path, 'w') as f:
-            json.dump(records, f)
+    dumpData(transformPython(profile), path, format)
 
 
 def savePytorchProfile(

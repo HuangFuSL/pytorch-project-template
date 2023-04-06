@@ -1,8 +1,8 @@
-import csv
-import json
 from typing import Dict, List, Mapping, Sequence
 
 from PySide6.QtCore import QObject, Signal, Slot
+
+from ..common import dumpData
 
 
 class QScalarStorage(QObject):
@@ -27,6 +27,10 @@ class QScalarStorage(QObject):
     def content(self) -> Mapping[str, Sequence[float]]:
         return self._scalars
 
+    @property
+    def records(self):
+        return list(self._row_iter())
+
     @Slot(str, float, bool, name='scalars')
     def onScalarReceived(self, name: str, value: float, silent: bool = False):
         self._scalars.setdefault(name, []).append(value)
@@ -43,11 +47,7 @@ class QScalarStorage(QObject):
         self.update.emit()
 
     def to_csv(self, path: str):
-        with open(path, 'w', newline='') as f:
-            writer = csv.DictWriter(f, self._scalars.keys())
-            writer.writeheader()
-            writer.writerows(self._row_iter())
+        dumpData(self.records, path, 'csv')
 
     def to_json(self, path: str):
-        with open(path, 'w') as f:
-            json.dump(list(self._row_iter()), f)
+        dumpData(self.records, path, 'json')
