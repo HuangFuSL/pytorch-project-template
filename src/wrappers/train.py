@@ -1,7 +1,8 @@
 import collections
 import functools
+import os
 import time
-from typing import Callable, Optional, Type
+from typing import Callable, Dict, Optional, Type
 
 import torch.nn
 import torch.optim
@@ -9,6 +10,17 @@ import torch.utils.data
 import tqdm
 from PySide6.QtCore import QThread, Signal
 from typing_extensions import Literal
+
+from ..common import PytorchProfileRecord
+
+
+def fixJson(in_: str, out: str):
+    o = open(out, 'w')
+    with open(in_, 'r') as f:
+        for line in f:
+            o.write(line.replace('\\', '\\\\'))
+    o.close()
+    os.remove(in_)
 
 
 class QTrainingWorker(QThread):
@@ -18,9 +30,10 @@ class QTrainingWorker(QThread):
     epochStart = Signal(int, float, name='epochStart')
     epochEnd = Signal(int, float, name='epochEnd')
     pythonProf = Signal(dict, float, name='profile')
+    pytorchProf = Signal(list, dict, name='pytorchProfile')
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._epoch: Optional[int] = None
         self._model: Optional[torch.nn.Module] = None
         self._optim: Optional[torch.optim.Optimizer] = None
@@ -30,7 +43,9 @@ class QTrainingWorker(QThread):
         self._thread: Optional[QThread] = None
         self._currentEpoch = 0
         self._pythonProfile: Optional[Literal['c', 'py']] = None
+        self._pytorchProfileArgs: Optional[Dict[str, bool]] = None
         self._device = torch.device('cpu')
+        self._pytorchChromePath: Optional[str] = None
 
     def __len__(self):
         return self.epoch
@@ -80,6 +95,16 @@ class QTrainingWorker(QThread):
     def pythonProfile(self):
         return self._pythonProfile
 
+    @property
+    def pytorchProfileArgs(self):
+        if self._pytorchProfileArgs is None:
+            return {'enabled': False}
+        return self._pytorchProfileArgs
+
+    @property
+    def pytorchChromePath(self):
+        return self._pytorchChromePath
+
     def setModel(self, model: torch.nn.Module):
         if hash(model) != hash(self._model):
             self._model = model
@@ -113,6 +138,18 @@ class QTrainingWorker(QThread):
 
     def setPythonProfile(self, profile: Optional[Literal['c', 'py']] = None):
         self._pythonProfile = profile
+
+    def setPytorchProfile(
+        self, enabled: bool, cpu: bool, gpu: bool, mem: bool
+    ):
+        self._pytorchProfileArgs = {
+            'enabled': enabled, 'use_cuda': gpu, 'use_cpu': cpu,
+            'profile_memory': mem, 'use_kineto': not cpu,
+            'with_stack': True, 'with_modules': True,
+        }
+
+    def setPytorchChromePath(self, path: Optional[str] = None):
+        self._pytorchChromePath = path
 
     def performEpoch(self, start: int, index: int):
         self._currentEpoch = index
@@ -150,16 +187,43 @@ class QTrainingWorker(QThread):
             profile = __import__('profile')
         else:
             profile = None
+
+        def pytorchProfilerWrapper(func, *func_args):
+            with torch.autograd.profiler.profile(**self.pytorchProfileArgs) as prof:
+                func(*func_args)
+            return prof
+
         try:
             start = self._currentEpoch + 1
             self.model.train()
             for _ in range(start, start + self.epoch):
                 if profile is not None and pstats is not None:
                     pr = profile.Profile()
-                    pr.runcall(self.performEpoch, start, _)
+                    result = pr.runcall(
+                        pytorchProfilerWrapper,
+                        self.performEpoch, start, _
+                    )
                     p = pstats.Stats(pr).get_stats_profile()
                     self.pythonProf.emit(p.func_profiles, p.total_tt)
                 else:
-                    self.performEpoch(start, _)
+                    result = pytorchProfilerWrapper(
+                        self.performEpoch, start, _
+                    )
+                if result is not None:
+                    if self.pytorchChromePath is not None:
+                        temp = os.path.join(self.pytorchChromePath, 'temp')
+                        newPath = os.path.join(
+                            self.pytorchChromePath, f'epoch_{_}.json'
+                        )
+                        result.export_chrome_trace(temp)
+                        fixJson(temp, newPath)
+                    keyAvgs = [
+                        PytorchProfileRecord.fromProfile(result, _).toDict()
+                        for _ in result.key_averages()
+                    ]
+                    totalAvg = PytorchProfileRecord.fromProfile(
+                        result, result.total_average()
+                    ).toDict()
+                    self.pytorchProf.emit(keyAvgs, totalAvg)
         finally:
             self.ended.emit()

@@ -1,11 +1,13 @@
-from typing import Any, Callable, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence
 
 from PySide6.QtCore import Qt, QTimer, Slot
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QMainWindow,
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (QCheckBox, QFileDialog, QLabel, QMainWindow,
                                QProgressBar, QRadioButton, QTableWidget,
-                               QWidget)
+                               QTableWidgetItem, QWidget)
 
 from .. import PROJECT_NAME
+from ..common import PytorchProfileRecord
 from ..model import closure
 from ..wrappers import QScalarStorage, QTrainingWorker
 from . import dynamic, form_ui, profile, torch
@@ -78,6 +80,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(PROJECT_NAME)
 
         self.profile = []
+        self.pytorchProfile = []
         self.epochStartTime = 0
 
         self.trainer = QTrainingWorker()
@@ -86,6 +89,7 @@ class MainWindow(QMainWindow):
         self.trainer.epochStart.connect(self.on_epochStart)
         self.trainer.epochEnd.connect(self.on_epochEnd)
         self.trainer.pythonProf.connect(self.onPythonProfileReceived)
+        self.trainer.pytorchProf.connect(self.onPytorchProfileReceived)
         self.trainer.setClosure(closure)
 
     def setupTrainerPage(self):
@@ -206,6 +210,47 @@ class MainWindow(QMainWindow):
             onPythonProfileChanged
         )
 
+        # PyTorch page
+        setupWidgets(
+            self.ui.pytorchGpuProfileToggle,
+            self.ui.pytorchMemProfileToggle,
+            self.ui.pytorchExportProfileToggle,
+            controller=self.ui.pytorchProfileToggle,
+        )
+        setupWidgets(
+            self.ui.pytorchExportChromeButton,
+            controller=self.ui.pytorchExportProfileToggle
+        )
+
+        def onPytorchProfileChanged(index: int):
+            if not self.pytorchProfile:
+                self.ui.pytorchProfileStatsTable.clear()
+                return
+            prof, total = self.pytorchProfile[index]
+            total_ = total.toDict()
+            self.ui.pytorchProfileStatsTable.clear()
+            profile.drawPytorchTable(prof, self.ui.pytorchProfileStatsTable)
+            for _ in ['cuda_time_total', 'cpu_time_total']:
+                total_[_] = profile.toTimeString(total_[_])
+            summ = '{count} function calls in ' \
+                '{cpu_time_total} CPU time and {cuda_time_total} GPU time'
+            self.ui.pytorchProfileSummaryLabel.setText(summ.format(**total_))
+
+        setupTableSort(self.ui.pytorchProfileStatsTable)
+        self.ui.pytorchProfileEpochCombo.currentIndexChanged.connect(
+            onPytorchProfileChanged
+        )
+
+        # Only one profile can be enabled
+        setupWidgets(
+            self.ui.pytorchProfileToggle,
+            controller=self.ui.pythonProfileToggle, reverse=True
+        )
+        setupWidgets(
+            self.ui.pythonProfileToggle,
+            controller=self.ui.pytorchProfileToggle, reverse=True
+        )
+
     def setupTrainParams(self, initializeModel: bool = True):
         # Super parameters
         epoch = self.ui.epochInput.value()
@@ -214,13 +259,21 @@ class MainWindow(QMainWindow):
         enableScheduler = self.ui.schedulerToggle.isChecked()
         useCuda = self.ui.useCudaToggle.isChecked()
         cudaDevId = self.ui.cudaSelectCombo.currentIndex()
-        if self.ui.pythonProfileToggle.isChecked():
+        if self.ui.pythonProfileToggle.isEnabled() and \
+                self.ui.pythonProfileToggle.isChecked():
             if self.ui.cPythonProfileToggle.isChecked():
                 profile = 'c'
             else:
                 profile = 'py'
         else:
             profile = None
+        pytorchProfile = {
+            'enabled': self.ui.pytorchProfileToggle.isEnabled() and
+            self.ui.pytorchProfileToggle.isChecked(),
+            'cpu': self.ui.pytorchCpuProfileToggle.isChecked(),
+            'gpu': self.ui.pytorchGpuProfileToggle.isChecked(),
+            'mem': self.ui.pytorchMemProfileToggle.isChecked()
+        }
 
         # Model and optimizer
         if initializeModel:
@@ -253,7 +306,9 @@ class MainWindow(QMainWindow):
             )
         self.trainer.setDataloader(dataloader)
         self.trainer.setPythonProfile(profile)
+        self.trainer.setPytorchProfile(**pytorchProfile)
         self.profile.clear()
+        self.pytorchProfile.clear()
 
         # UI element
         self.ui.buttonStart.setEnabled(False)
@@ -266,6 +321,11 @@ class MainWindow(QMainWindow):
         self.ui.pythonProfileStatsTable.clear()
         self.ui.pythonProfileSummaryLabel.setText(
             'xxx function calls (yyy primitive calls) in zzz seconds'
+        )
+        self.ui.pytorchProfileEpochCombo.clear()
+        self.ui.pytorchProfileStatsTable.clear()
+        self.ui.pytorchProfileSummaryLabel.setText(
+            'Total CPU time: xxx, total GPU time: yyy'
         )
 
         if initializeModel:
@@ -339,6 +399,18 @@ class MainWindow(QMainWindow):
         if len(self.profile) == 1:
             self.ui.pythonProfileEpochCombo.setCurrentIndex(0)
 
+    def onPytorchProfileReceived(
+        self, records: List[Dict[str, Any]], total: Dict[str, Any]
+    ):
+        records_ = [PytorchProfileRecord(**r) for r in records]
+        total_ = PytorchProfileRecord(**total)
+        self.pytorchProfile.append((records_, total_))
+        self.ui.pytorchProfileEpochCombo.addItem(
+            f'Epoch {len(self.pytorchProfile)}'
+        )
+        if len(self.pytorchProfile) == 1:
+            self.ui.pytorchProfileEpochCombo.setCurrentIndex(0)
+
     @Slot()
     def on_buttonSavePythonProfile_clicked(self):
         filters = {'CSV (*.csv)': 'csv', 'JSON (*.json)': 'json'}
@@ -350,3 +422,32 @@ class MainWindow(QMainWindow):
         index = self.ui.pythonProfileEpochCombo.currentIndex()
         profile.savePythonProfile(
             self.profile[index][0], dest, filters[filter])
+
+    @Slot()
+    def on_buttonSavePytorchProfile_clicked(self):
+        filters = {'CSV (*.csv)': 'csv', 'JSON (*.json)': 'json'}
+        dest, filter = QFileDialog.getSaveFileName(
+            self, 'Save profile stats', '.', ';;'.join(filters)
+        )
+        if not dest:
+            return
+        index = self.ui.pytorchProfileEpochCombo.currentIndex()
+        profile.savePytorchProfile(
+            self.pytorchProfile[index][0], dest, filters[filter]
+        )
+
+    @Slot()
+    def on_pytorchExportChromeButton_clicked(self):
+        dest = QFileDialog.getExistingDirectory(
+            self, 'Export profile stats', '.'
+        )
+        if not dest:
+            return
+        self.trainer.setPytorchChromePath(dest)
+
+    @Slot()
+    def on_pytorchExportProfileToggle_stateChanged(self):
+        if self.ui.pytorchExportProfileToggle.isChecked():
+            self.on_pytorchExportChromeButton_clicked()
+        else:
+            self.trainer.setPytorchChromePath(None)
