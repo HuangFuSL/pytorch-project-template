@@ -57,11 +57,17 @@ def detectOptimizers():
 
 
 def detectSchedulers():
-    return detectClasses(
-        torch.optim.lr_scheduler, False,
-        torch.optim.lr_scheduler._LRScheduler,
-        torch.optim.lr_scheduler.LRScheduler
-    )
+    try:
+        return detectClasses(
+            torch.optim.lr_scheduler, False,
+            torch.optim.lr_scheduler._LRScheduler,
+            torch.optim.lr_scheduler.LRScheduler
+        )
+    except AttributeError:
+        return detectClasses(
+            torch.optim.lr_scheduler, False,
+            torch.optim.lr_scheduler._LRScheduler
+        )
 
 
 def detectDataLoaders():

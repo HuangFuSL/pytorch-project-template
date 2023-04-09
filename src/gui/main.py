@@ -33,27 +33,33 @@ def setupTableSort(widget: QTableWidget):
 
 
 def setupBackendToggle(
-    disabled: List[QCheckBox], enabled: List[QCheckBox],
-    cudaGroup: List[QCheckBox], cudnnGroup: List[QCheckBox]
+    controls: Dict[str, QCheckBox],
+    cudaGroup: Dict[str, QCheckBox], cudnnGroup: Dict[str, QCheckBox]
 ):
-    d, e, f, cudaStatus, cudnnStatus = torch.detectBackends()
-    for widget, _ in zip(disabled, d):
-        widget.setChecked(_)
-    for widget, _ in zip(enabled, e):
-        widget.setEnabled(_)
-    for widget, (_, setter) in zip(enabled, f):
-        widget.setChecked(_)
-        widget.stateChanged.connect(setter)  # type: ignore
-    for widget, (_, setter) in zip(cudaGroup, cudaStatus):
-        widget.setEnabled(d[0])
-        if d[0]:
-            widget.setChecked(_)
-        widget.stateChanged.connect(setter)  # type: ignore
-    for widget, (_, setter) in zip(cudnnGroup, cudnnStatus):
-        widget.setEnabled(e[0] and f[0][0])
-        if e[0] and f[0]:
-            widget.setChecked(_)
-        widget.stateChanged.connect(setter)  # type: ignore
+    result = torch.detectBackends()
+    for k, v in result.items():
+        if '_' not in k:
+            controls[k].setChecked(v.value)
+            controls[k].setEnabled(v.setter is not None)
+            if v.setter is not None:
+                controls[k].stateChanged.connect(v.setter)
+
+        if k.startswith('cuda_'):
+            label = k[5:]
+            cudaGroup[label].setChecked(v.value)
+            cudaGroup[label].setEnabled(v.setter is not None)
+            if v.setter is not None:
+                cudaGroup[k].stateChanged.connect(v.setter)
+
+        if k.startswith('cudnn_'):
+            label = k[6:]
+            cudnnGroup[label].setChecked(v.value)
+            cudnnGroup[label].setEnabled(v.setter is not None)
+            if v.setter is not None:
+                cudnnGroup[k].stateChanged.connect(v.setter)
+
+    setupWidgets(*cudaGroup.values(), controller=controls['cuda'])
+    setupWidgets(*cudnnGroup.values(), controller=controls['cudnn'])
 
 
 def setWidgetAttribute(*widgets: QWidget, method: Callable[..., None], args: Sequence[Any]):
@@ -126,24 +132,23 @@ class MainWindow(QMainWindow):
         self.ui.reloadDataButton.clicked.connect(self.dataSelector.refresh)
 
     def setupCudaPage(self):
-        setupBackendToggle([
-            self.ui.cudaAvailableToggle,
-            self.ui.mpsAvailableToggle,
-            self.ui.mklAvailableToggle,
-            self.ui.mkldnnAvailableToggle,
-            self.ui.openmpAvailableToggle
-        ], [
-            self.ui.cudnnAvailableToggle,
-            self.ui.opteinsumAvailableToggle
-        ], [
-            self.ui.cudaTF32Toggle,
-            self.ui.cudaFP16Toggle,
-            self.ui.cudaBF16Toggle
-        ], [
-            self.ui.cudnnTF32Toggle,
-            self.ui.cudnnDetermToggle,
-            self.ui.cudnnBenchToggle
-        ])
+        setupBackendToggle(controls={
+            'cuda': self.ui.cudaAvailableToggle,
+            'cudnn': self.ui.cudnnAvailableToggle,
+            'mkl': self.ui.mklAvailableToggle,
+            'mkldnn': self.ui.mkldnnAvailableToggle,
+            'mps': self.ui.mpsAvailableToggle,
+            'openmp': self.ui.openmpAvailableToggle,
+            'opteinsum': self.ui.opteinsumAvailableToggle
+        }, cudaGroup={
+            'matmul_allow_tf32': self.ui.cudaTF32Toggle,
+            'matmul_allow_fp16': self.ui.cudaFP16Toggle,
+            'matmul_allow_bf16': self.ui.cudaBF16Toggle
+        }, cudnnGroup={
+            'benchmark': self.ui.cudnnBenchToggle,
+            'deterministic': self.ui.cudnnDetermToggle,
+            'allow_tf32': self.ui.cudnnTF32Toggle
+        })
         self.ui.cudaVersionLabel.setText(torch.getCudaVersion())
         cudaStatus = self.ui.cudaAvailableToggle.isChecked()
         cudaDevices = torch.getCudaDevices()
@@ -211,10 +216,15 @@ class MainWindow(QMainWindow):
         )
 
         # PyTorch page
+        if torch.getCudaVersion() != 'Not available':
+            gpuToggle = [self.ui.pytorchGpuProfileToggle]
+        else:
+            self.ui.pytorchGpuProfileToggle.setEnabled(False)
+            self.ui.pytorchGpuProfileToggle.setChecked(False)
+            gpuToggle = []
         setupWidgets(
-            self.ui.pytorchGpuProfileToggle,
             self.ui.pytorchMemProfileToggle,
-            self.ui.pytorchExportProfileToggle,
+            self.ui.pytorchExportProfileToggle, *gpuToggle,
             controller=self.ui.pytorchProfileToggle,
         )
         setupWidgets(

@@ -1,6 +1,6 @@
 import functools
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.backends
@@ -10,7 +10,12 @@ import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.mps
 import torch.backends.openmp
-import torch.backends.opt_einsum
+
+try:
+    import torch.backends.opt_einsum
+    opteinsum = True
+except ImportError:
+    opteinsum = False
 import torch.cuda
 
 
@@ -43,7 +48,8 @@ def setCudnnEnabled(enabled: bool):
 
 
 def setOpteinsumEnabled(enabled: bool):
-    torch.backends.opt_einsum.enabled = enabled
+    if opteinsum:
+        torch.backends.opt_einsum.enabled = enabled
 
 
 def setCudnnBenchmark(enabled: bool):
@@ -70,33 +76,86 @@ def setCudaMatmulAllowBF16(enabled: bool):
     torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = enabled
 
 
+class BackendAttribute():
+    def __init__(
+        self, enabled: bool, value: Optional[Callable[[], bool]],
+        setter: Optional[Callable[[bool], None]] = None
+    ):
+        self._enabled = enabled
+        if self._enabled:
+            self._value = value
+            self.setter = setter
+        else:
+            self._value, self.setter = None, None
+
+    @property
+    def value(self):
+        if self._enabled and self._value is not None:
+            return self._enabled and self._value()
+        return False
+
+    @value.setter
+    def value(self, value: bool):
+        if self._enabled and self.setter is not None:
+            self.setter(value)
+
+
 def detectBackends():
-    return [
+    attributes: Dict[str, BackendAttribute] = {}
+    disabled = [False, None, None]
+    attributes['cuda'] = BackendAttribute(True, torch.cuda.is_available)
+    attributes['mps'] = BackendAttribute(True, torch.backends.mps.is_available)
+    attributes['mkl'] = BackendAttribute(True, torch.backends.mkl.is_available)
+    attributes['mkldnn'] = BackendAttribute(
+        True, torch.backends.mkldnn.is_available
+    )
+    attributes['openmp'] = BackendAttribute(
+        True, torch.backends.openmp.is_available
+    )
+    attributes['cudnn'] = BackendAttribute(
         torch.cuda.is_available(),
-        torch.backends.mps.is_available(),
-        torch.backends.mkl.is_available(),
-        torch.backends.mkldnn.is_available(),
-        torch.backends.openmp.is_available()
-    ], [
-        torch.backends.cudnn.is_available(),
-        torch.backends.opt_einsum.is_available()
-    ], [
-        (torch.backends.cudnn.enabled, setCudnnEnabled),
-        (torch.backends.opt_einsum.enabled, setOpteinsumEnabled)
-    ], [
-        (torch.backends.cuda.matmul.allow_tf32, setCudaMatmulAllowTF32),
-        (
+        torch.backends.cudnn.is_available, setCudnnEnabled
+    )
+    if opteinsum:
+        attributes['opteinsum'] = BackendAttribute(
+            True, torch.backends.opt_einsum.is_available, setOpteinsumEnabled
+        )
+    else:
+        attributes['opteinsum'] = BackendAttribute(*disabled)
+    if torch.cuda.is_available():
+        attributes['cuda_matmul_allow_tf32'] = BackendAttribute(
+            True, torch.backends.cuda.matmul.allow_tf32, setCudaMatmulAllowTF32
+        )
+        attributes['cuda_matmul_allow_fp16'] = BackendAttribute(
+            True,
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
             setCudaMatmulAllowFP16
-        ), (
+        )
+        attributes['cuda_matmul_allow_bf16'] = BackendAttribute(
+            True,
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
             setCudaMatmulAllowBF16
         )
-    ], [
-        (torch.backends.cudnn.allow_tf32, setCudnnAllowTF32),
-        (torch.backends.cudnn.deterministic, setCudnnDeterministic),
-        (torch.backends.cudnn.benchmark, setCudnnBenchmark)
-    ]
+    else:
+        attributes['cuda_matmul_allow_tf32'] = BackendAttribute(*disabled)
+        attributes['cuda_matmul_allow_fp16'] = BackendAttribute(*disabled)
+        attributes['cuda_matmul_allow_bf16'] = BackendAttribute(*disabled)
+    if torch.backends.cudnn.is_available():
+        attributes['cudnn_benchmark'] = BackendAttribute(
+            True, lambda: torch.backends.cudnn.benchmark, setCudnnBenchmark
+        )
+        attributes['cudnn_deterministic'] = BackendAttribute(
+            True, lambda: torch.backends.cudnn.deterministic,
+            setCudnnDeterministic
+        )
+        attributes['cudnn_allow_tf32'] = BackendAttribute(
+            True, lambda: torch.backends.cudnn.allow_tf32, setCudnnAllowTF32
+        )
+    else:
+        attributes['cudnn_benchmark'] = BackendAttribute(*disabled)
+        attributes['cudnn_deterministic'] = BackendAttribute(*disabled)
+        attributes['cudnn_allow_tf32'] = BackendAttribute(*disabled)
+    return attributes
 
 
 def setCurrentDevice(device: int):
@@ -132,6 +191,8 @@ def getCudaDevices() -> Dict[int, Dict[str, Any]]:
 
 
 def getGpuMemory():
+    if not torch.cuda.is_available():
+        return [0, 0, 0, 0]
     return [
         _ / 1024 / 1024
         for _ in [
